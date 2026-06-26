@@ -1,0 +1,21 @@
+﻿# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# uv
+.python-version
+
+# Data files — personal financial data should never be committed
+data/
+
+# Positron / editor
+.positron/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
