@@ -4,11 +4,11 @@
 # layout function returns full panel including sidebar controls
 # callbacks to be added after layout confirmed working
 
-from pydantic._internal._dataclasses import as_dataclass_field
-from dash import dcc, html
+import pandas as pd
+from dash import dcc, html, Input, Output, callback
 import plotly.graph_objects as go
 
-# 1. Helper: empty placeholder figure ----
+# 1. Helper: empty placeholder figure (PLOTLY_THEME and _empty_fig()) ----
 # returns a blank plotly fig with dark theme applied
 # used for standin until callbacks finished
 # defined here so placeholders look consistent
@@ -31,7 +31,7 @@ def _empty_fig(title=""):
     )
     return fig
 
-# 2. Helpers: reusable card components ----
+# 2. Helpers: reusable card components (_kpi/_chart_card()) ----
 
 def _kpi_card(card_id, label):
     """
@@ -59,7 +59,7 @@ def _chart_card(chart_id, title):
     ], className='chart-card')
 
 
-# 3. Layout ----
+# 3. Layout (cashflow_layout()) ----
 
 def cashflow_layout():
     return html.Div([
@@ -114,3 +114,101 @@ def cashflow_layout():
     ], className='panel-grid')
 
 
+# 4. Data aggregation helpers (_waterfall_data()) ----
+
+def _waterfall_data(analysis_df, trailing_months):
+    """
+    Aggregate income and spending by bucket for the waterfall chart
+
+    Parameters
+    ----------
+    analysis_df: pd.DataFrame - dataframe excluding transfers from data.load_data()
+    trailing_months: int - number of trailing months to include (0 = all data)
+
+    Returns
+    -------
+    dict with keys: measure, x, y, text
+        Ready to pass into go.Waterfall()
+    """
+    # filter to trailing n months ----
+
+    now = pd.Timestamp.now()
+
+    if trailing_months == 0:
+        # 0 = all data = no filter
+        filtered = analysis_df.copy()
+    else:
+        cutoff = now - pd.DateOffset(months=trailing_months)
+        filtered = analysis_df[analysis_df['date'] >= cutoff].copy()
+
+    # sum by bucket ----
+    buckets = filtered.groupby('bucket')['amount'].sum()
+
+    # build waterfall structure ----
+    # plotly waterfall uses two bar types set via 'measure'
+    #  'relative' - bar that steps up or down from previous bar
+    #  'total' - bar that shows running total
+
+    income = buckets.get('Income', 0) # pos
+    needs  = buckets.get('Needs', 0)  # neg
+    wants  = buckets.get('Wants', 0)  # neg
+
+    net = income + needs + wants
+
+    return dict(
+        measure = ['relative', 'relative', 'relative', 'total'],
+        x       = ['Income', 'Needs', 'Wants', 'Net'],
+        y       = [income, needs, wants, net],
+        text    = [f'${v:,.0f}' if v >= 0 else f'-${abs(v):,.0f}' for v in [income, needs, wants, net]]
+    )
+
+
+# 5. Callbacks ----
+
+# change the cf-waterfall figure based on the value of cf-trailing-months
+@callback(
+    Output('cf-waterfall', 'figure'), # component_id, component_property
+    Input('cf-trailing-months', 'value')
+)
+def update_waterfall(trailing_months):
+    """
+    Fires when the trailing months dropdown changes, rebuilding the waterfall fig each time
+    
+    Callbacks are functions decorated with @callback
+    Inputs are component properties that trigger the function
+    Outputs are component properties that get updated with return value (output = f(inputs))
+    """
+    from data import load_data # avoiding circular imports at module level
+
+    _, analysis_df = load_data()
+
+    # get aggregated waterfall data using helper
+    wd = _waterfall_data(analysis_df, trailing_months)
+
+    # build the figure ----
+    # go.Figure() is the container (cf ggplot())
+    # go.Waterfall() is the trace (cf geom_ layer)
+    fig = go.Figure(
+        go.Waterfall(
+            measure = wd['measure'],
+            x            = wd['x'],
+            y            = wd['y'],
+            text         = wd['text'],
+            textposition = 'outside',
+            increasing   = dict(marker=dict(color='#7EB8A4')), # green for pos
+            decreasing   = dict(marker=dict(color='#C87070')), # red for neg
+            totals       = dict(marker=dict(color='#A89FD8')), # purple for net
+            connector    = dict(line=dict(color='#2a2e3a', width=1)) # border color
+        )
+    )
+
+    fig.update_layout(
+        **PLOTLY_THEME,
+        height = 400,
+        margin = dict(t=40, b=40, l=40, r=40),
+    )
+
+    fig.update_yaxes(tickprefix='$', tickformat=',.0f', gridcolor='#1e2230', showgrid=True)
+    fig.update_xaxes(gridcolor='#1e2230', showgrid=False)
+
+    return fig
