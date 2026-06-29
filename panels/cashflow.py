@@ -114,7 +114,7 @@ def cashflow_layout():
     ], className='panel-grid')
 
 
-# 4. Data aggregation helpers (_waterfall_data()) ----
+# 4. Data aggregation helpers (_waterfall/_stl__data()) ----
 
 def _waterfall_data(analysis_df, trailing_months):
     """
@@ -163,6 +163,60 @@ def _waterfall_data(analysis_df, trailing_months):
     )
 
 
+def _stl_data(analysis_df, trailing_months):
+    """
+    Aggregate monthly spending and apply STL decomposition
+
+    STL splits time series into trend/seasonal/residual
+
+    Parameters
+    ----------
+    analysis_df : pd.DataFrame
+    trailing_months : int - 0 = all data
+
+    Returns
+    -------
+    pd.DataFrame with columns: month, spending, trend, seasonal, residual
+    """
+    from statsmodels.tsa.seasonal import STL
+
+    expenses = analysis_df[analysis_df['type'] == 'Expense'].copy()
+
+    monthly = (
+        expenses
+        .groupby(expenses['date'].dt.to_period('M'))['amount']
+        .sum()
+        .abs()
+        .reset_index()
+    )
+    monthly.columns = ['month', 'spending']
+    monthly['month'] = monthly['month'].dt.to_timestamp()
+
+    # exclude partial first month (Nov 2023) ----
+    monthly = monthly[monthly['month'] >= '2023-12-01'].copy()
+
+    # apply trailing months filter ----
+    if trailing_months != 0:
+        now = pd.Timestamp.now()
+        cutoff = now - pd.DateOffset(months=trailing_months)
+        monthly = monthly[monthly['month'] >= cutoff].copy()
+
+    # STL needs at least 2 full seasonal cycles (here years) to decompose ----
+    # if filtered series is too short, return None
+    if len(monthly) < 24:
+        return None
+
+    # run STL ----
+    stl = STL(monthly['spending'], period=12, seasonal=13, robust=True)
+    result = stl.fit()
+
+    monthly['trend']    = result.trend
+    monthly['seasonal'] = result.seasonal
+    monthly['residual'] = result.resid
+
+    return monthly
+
+
 # 5. Callbacks ----
 
 # change the cf-waterfall figure based on the value of cf-trailing-months
@@ -209,6 +263,110 @@ def update_waterfall(trailing_months):
     )
 
     fig.update_yaxes(tickprefix='$', tickformat=',.0f', gridcolor='#1e2230', showgrid=True)
+    fig.update_xaxes(gridcolor='#1e2230', showgrid=False)
+
+    return fig
+
+
+# again, figure depends on value of trailing months
+@callback(
+    Output('cf-stl', 'figure'),
+    Input('cf-trailing-months', 'value')
+)
+def update_stl(trailing_months):
+    """
+    STL decomposition of monthly spending
+    Shows trend, seasonal, and residual components as subplots
+
+    make_subplots() is like par(mfrow=c(3,1)) in R or fig, axes = plt.subplots(3,1) in matplotlib
+    """
+    from data import load_data
+    from plotly.subplots import make_subplots
+
+    _, analysis_df = load_data()
+    monthly = _stl_data(analysis_df, trailing_months)
+
+    # handle cases when not enough data
+    if monthly is None:
+        fig = go.Figure()
+        fig.update_layout(
+            **PLOTLY_THEME,
+            height=400,
+            title=dict(text='Not enough data for STL (need 24+ months)',
+                    font=dict(color='#6b7080'))
+        )
+        return fig
+
+    # build subplot figure ----
+    # 3 rows,1 column, trend -> seasonal -> residual
+    # shared_xaxes=True links x-axes so zooming zooms all three
+    fig = make_subplots(
+        rows=3, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.08,
+        subplot_titles=['Trend', 'Seasonal', 'Residual']
+    )
+
+    # trend: line chart ----
+    # go.Scatter with mode='lines' is line chart
+    # equiv to geom_line()
+    fig.add_trace(
+        go.Scatter(
+            x=monthly['month'],
+            y=monthly['trend'],
+            mode='lines',
+            line=dict(color='#7EB8A4', width=2),
+            name='Trend',
+            hovertemplate='%{x|%b %Y}: $%{y:,.0f}<extra></extra>' # last bit suppresses default trace name in hover box
+        ),
+        row=1, col=1
+    )
+
+    # seasonal: bar chart ----
+    # positive seasonal = month above trend
+    # negative seasonal = month below trend
+    fig.add_trace(
+        go.Bar(
+            x=monthly['month'],
+            y=monthly['seasonal'],
+            marker=dict(
+                color=monthly['seasonal'],
+                # maps values to colors
+                colorscale=[[0, '#C87070'], [0.5, '#2a2e3a'], [1, '#7EB8A4']],
+                cmid=0, # center colorscale at 0
+            ),
+            name='Seasonal',
+            hovertemplate='%{x|%b %Y}: $%{y:,.0f}<extra></extra>'
+        ),
+        row=2, col=1
+    )
+
+    # residual: bar chart ----
+    # large residuals = one-off events
+    fig.add_trace(
+        go.Bar(
+            x=monthly['month'],
+            y=monthly['residual'],
+            marker=dict(
+                color=monthly['residual'],
+                colorscale=[[0, '#C87070'], [0.5, '#2a2e3a'], [1, '#7EB8A4']],
+                cmid=0
+            ),
+            name='Residual',
+            hovertemplate='%{x|%b %Y}: $%{y:,.0f}<extra></extra>'
+        ),
+        row=3, col=1,
+    )
+
+    # apply theme ----
+    fig.update_layout(
+        **PLOTLY_THEME,
+        height=600,
+        showlegend=False,
+        margin=dict(t=40, b=40, l=40, r=40)
+    )
+
+    fig.update_yaxes(tickprefix='$', tickformat=',.0f', gridcolor='#1e2230')
     fig.update_xaxes(gridcolor='#1e2230', showgrid=False)
 
     return fig
