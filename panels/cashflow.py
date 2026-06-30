@@ -34,6 +34,7 @@ def _empty_fig(title=""):
     )
     return fig
 
+
 # 2. Helpers: reusable card components (_kpi/_chart_card()) ----
 
 def _kpi_card(card_id, label):
@@ -690,4 +691,57 @@ def update_vs_avg(trailing_months):
 
     return fig
 
- 
+ # KPIs
+@callback(
+    Output('kpi-income', 'children'),
+    Output('kpi-spending', 'children'),
+    Output('kpi-vs-avg', 'children'),
+    Output('kpi-biggest-mover', 'children'),
+    Input('cf-trailing-months', 'value') # for consistency; ignored here
+ )
+def update_kpis(trailing_months):
+    """
+    Updates all four KPI cards in a single callback (same underlying data)
+    Current month income, spending, vs_avg_data
+    One data load
+    """
+    from data import load_data
+
+    _, analysis_df = load_data()
+
+    now = pd.Timestamp.now()
+    current_month_start = now.replace(day=1)
+
+    # income MTD ----
+    income_mtd = analysis_df[
+        (analysis_df['type'] == 'Income') &
+        (analysis_df['date'] >= current_month_start)
+    ]['amount'].sum()
+    income_mtd = abs(income_mtd)
+
+    # spending MTD ----
+    spending_mtd = analysis_df[
+        (analysis_df['type'] == 'Expense') &
+        (analysis_df['date'] >= current_month_start)
+    ]['amount'].sum()
+    spending_mtd = abs(spending_mtd)
+
+    # vs 3-month avg (total, not per category) ----
+    # reuse _vs_avg_data, sum prorated current and trailing columns
+    comparison = _vs_avg_data(analysis_df)
+    total_current_prorated = comparison['current_prorated'].sum()
+    total_trailing_avg = comparison['trailing_avg'].sum()
+    total_deviation = total_current_prorated - total_trailing_avg
+
+    # biggest mover ----
+    # comparison already sorted by deviation descending from _vs_avg_data()
+    biggest_mover_row = comparison.iloc[0]
+    biggest_mover_text = f'{biggest_mover_row['category']} (${biggest_mover_row['deviation']:+,.0f})'
+
+    return (
+        f'${income_mtd:,.0f}',
+        f'${spending_mtd:,.0f}',
+        f'${total_deviation:+,.0f}',
+        biggest_mover_text
+    )
+
