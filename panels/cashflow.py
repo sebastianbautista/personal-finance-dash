@@ -21,6 +21,7 @@ PLOTLY_THEME = dict(
     font=dict(family="DM Mono, monospace", size=11, color="#9aa0b0"),
     xaxis=dict(gridcolor="#1e2230", showgrid=True),
     yaxis=dict(gridcolor="#1e2230", showgrid=True),
+    hoverlabel=dict(bgcolor='#1b1e26', font=dict(color='#dde0e8')),  # consistent tooltip styling across all charts
 )
 
 def _empty_fig(title=""):
@@ -138,7 +139,7 @@ def cashflow_layout():
     ], className='panel-grid')
 
 
-# 4. Data aggregation helpers (_waterfall/_stl/_heatmap_data()) ----
+# 4. Data aggregation helpers (_waterfall/_stl/_heatmap/_vs_avg_data()) ----
 
 def _waterfall_data(analysis_df, trailing_months):
     """
@@ -317,7 +318,66 @@ def _heatmap_data(analysis_df, trailing_months, min_transactions=10):
     return pivot, pivot_normalized
 
 
-# 5. Callbacks: update all three figures ----
+def _vs_avg_data(analysis_df):
+    """
+    Compare current month's (prorated) spending by category against each
+    category's trailing 3-month average, ranked by deviation
+
+    Proration: scale current spending by (days_in_month / days_elapsed) to estimate
+    a full-month pace, making the comparison meaningful at any point in the month
+
+    Note: 3-month timespan is hard-coded, so no trailing_months parameter 
+
+    Parameters
+    ----------
+    analysis_df : pd.DataFrame
+
+    Returns
+    -------
+    pd.DataFrame with columns: category, current_prorated, trailing_avg, deviation
+    sorted by deviation descending
+    """
+
+    expenses = analysis_df[analysis_df['type'] == 'Expense'].copy()
+
+    now = pd.Timestamp.now()
+    current_month_start = now.replace(day=1)
+
+    # curent month spending by category ----
+    current = expenses[expenses['date'] >= current_month_start]
+    current_by_cat = current.groupby('category')['amount'].sum().abs()
+
+    # prorate to estimate full-month pace ----
+    days_in_month = calendar.monthrange(now.year, now.month)[1] # [1] = number of dadys
+    days_elapsed = now.day
+    proration_factor = days_in_month / days_elapsed
+
+    current_prorated = current_by_cat * proration_factor
+
+    # trailing 3-month average ----
+    three_month_cutoff = current_month_start - pd.DateOffset(months=3)
+    trailing = expenses[
+        (expenses['date'] >= three_month_cutoff) &
+        (expenses['date'] < current_month_start)
+    ]
+    trailing_avg_by_cat = trailing.groupby('category')['amount'].sum().abs() / 3
+
+    # combine ----
+    comparison = pd.DataFrame({
+        'current_prorated': current_prorated,
+        'trailing_avg': trailing_avg_by_cat,
+    }).fillna(0)
+
+    comparison['deviation'] = comparison['current_prorated'] - comparison['trailing_avg']
+
+    comparison = comparison.round(2)
+    comparison = comparison.reset_index().rename(columns={'index': 'category'})
+    comparison = comparison.sort_values('deviation', ascending=False)
+
+    return comparison
+
+
+# 5. Callbacks: update all four figures ----
 
 # change the cf-waterfall figure based on the value of cf-trailing-months
 @callback(
@@ -342,6 +402,7 @@ def update_waterfall(trailing_months):
     # build the figure ----
     # go.Figure() is the container (cf ggplot())
     # go.Waterfall() is the trace (cf geom_ layer)
+    
     fig = go.Figure(
         go.Waterfall(
             measure = wd['measure'],
@@ -352,7 +413,7 @@ def update_waterfall(trailing_months):
             increasing   = dict(marker=dict(color='#7EB8A4')), # green for pos
             decreasing   = dict(marker=dict(color='#C87070')), # red for neg
             totals       = dict(marker=dict(color='#A89FD8')), # purple for net
-            connector    = dict(line=dict(color='#2a2e3a', width=1)) # border color
+            connector    = dict(line=dict(color='#2a2e3a', width=1)), # border color
         )
     )
 
@@ -577,3 +638,56 @@ def update_heatmap(trailing_months, scale_mode):
     )
 
     return fig
+
+
+@callback(
+    Output('cf-vs-avg', 'figure'),
+    Input('cf-trailing-months', 'value') # included for consistency but ignored
+)
+def update_vs_avg(trailing_months):
+    """
+    Bar chart: current month's prorated spending vs trailing 3-month average,
+    by category, ranked by deviation. Shows any categories running hot or cold
+    relative to recent habits
+
+    Note: this always compares to a fixed 3-month trailing window regardless of trailing_months
+    """
+    from data import load_data
+
+    _, analysis_df = load_data()
+    comparison = _vs_avg_data(analysis_df)
+
+    # color bars by direction: red = higher than usual, green = lower
+    colors = ['#C87070' if d > 0 else '#7EB8A4' for d in comparison['deviation']] 
+
+    fig = go.Figure(
+        go.Bar(
+            x=comparison['deviation'],
+            y=comparison['category'],
+            orientation='h', # easier to read category names horizontally
+            marker=dict(color=colors),
+            text=[f'${d:+,.0f}' for d in comparison['deviation']], # + sign shows direction explicitly
+            textposition='outside',
+            hovertemplate=(
+                '%{y}<br>'
+                'This month (prorated): $%{customdata[0]:,.0f}<br>'
+                '3-month avg: $%{customdata[1]:,.0f}<br>'
+                'Deviation: %${x:+,.0f}'
+                '<extra></extra>'
+            ),
+            customdata=comparison[['current_prorated', 'trailing_avg']].values
+        )
+    )
+
+    fig.update_layout(
+        **PLOTLY_THEME,
+        height=600,
+        margin=dict(t=40, b=40, l=140, r=60) # l=140 for category label room
+    )
+
+    fig.update_yaxes(autorange='reversed') # largest positive deviation at top
+    fig.update_xaxes(tickprefix='$', tickformat=',.0f', gridcolor='#1e2230')
+
+    return fig
+
+ 
