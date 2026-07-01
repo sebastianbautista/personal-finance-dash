@@ -134,7 +134,8 @@ def cashflow_layout():
                 ),
             ], className='chart-card'),
 
-            _chart_card('cf-vs-avg',    'This Month vs 3-Month Average'),
+            _chart_card('cf-vs-avg',     'This Month vs 3-Month Average'),
+            _chart_card('cf-volatility', 'Spending Volatility by Category'),
 
         ], className='main-content')
     ], className='panel-grid')
@@ -376,6 +377,62 @@ def _vs_avg_data(analysis_df):
     comparison = comparison.sort_values('deviation', ascending=False)
 
     return comparison
+
+
+def _volatility_data(analysis_df, trailing_months, min_transactions=10):
+    """
+    Coefficient of variation (CV = std / mean) of monthly spending per category
+    High CV = erratic/unpredictable spending; low CV = stable/predictable
+
+    Cf. mortgage/loan stability/risk score
+
+    Parameters
+    ----------
+    analysis_df : pd.DataFrame
+    trailing_months : int - 0 = all data
+    min_transactions : int - reuse same sparsity cutoff as heatmap
+
+    Returns
+    -------
+    pd.DataFrame with columns: category, mean_spending, std_spending, cv
+    sorted by cv descending
+    """
+
+    expenses = analysis_df[analysis_df['type'] == 'Expense'].copy()
+
+    # trailing months filter ----
+    if trailing_months != 0:
+        now = pd.Timestamp.now()
+        cutoff = now - pd.DateOffset(months=trailing_months)
+        expenses = expenses[expenses['date'] >= cutoff].copy()
+
+    # drop sparse categories ----
+    counts = expenses['category'].value_counts()
+    valid_categories = counts[counts > min_transactions].index
+    expenses = expenses[expenses['category'].isin(valid_categories)]
+
+    # monthly spending per category ----
+    # same shape as heatmap pivot, but month-year instead of month-of-year
+    expenses['month'] = expenses['date'].dt.to_period('M')
+
+    monthly = (
+        expenses
+        .groupby(['category', 'month'])['amount']
+        .sum()
+        .abs()
+        .reset_index()
+    )
+
+    # compute mean/std/cv per category across monthly totals
+    stats = monthly.groupby('category')['amount'].agg(['mean', 'std']).reset_index()
+    stats.columns = ['category', 'mean_spending', 'std_spending']
+    stats['std_spending'] = stats['std_spending'].fillna(0) # single-month categories have NaN std
+
+    stats['cv'] = stats['std_spending'] / stats['mean_spending'].replace(0, 1) # guard against divide by zero
+
+    stats = stats.sort_values('cv', ascending=False)
+
+    return stats
 
 
 # 5. Callbacks: update all four figures ----
@@ -673,7 +730,7 @@ def update_vs_avg(trailing_months):
                 '%{y}<br>'
                 'This month (prorated): $%{customdata[0]:,.0f}<br>'
                 '3-month avg: $%{customdata[1]:,.0f}<br>'
-                'Deviation: %${x:+,.0f}'
+                'Deviation: $%{x:+,.0f}'
                 '<extra></extra>'
             ),
             customdata=comparison[['current_prorated', 'trailing_avg']].values
@@ -745,3 +802,48 @@ def update_kpis(trailing_months):
         biggest_mover_text
     )
 
+
+@callback(
+    Output('cf-volatility', 'figure'),
+    Input('cf-trailing-months', 'value'),
+)
+def update_volatility(trailing_months):
+    """
+    Horizontal bar chart of spending volatility (CV) by category
+    Most erratic at top, stable at bottom
+    """
+    from data import load_data
+
+    _, analysis_df = load_data()
+    stats = _volatility_data(analysis_df, trailing_months)
+
+    # horizontal - cv on x-axis, category on y
+    fig = go.Figure(
+        go.Bar(
+            x=stats['cv'],
+            y=stats['category'],
+            orientation='h',
+            marker=dict(color='#A89FD8'),
+            text=[f'{cv:.2f}' for cv in stats['cv']],
+            textposition='outside',
+            hovertemplate=(
+                '%{y}<br>'
+                'CV: %{x:.2f}<br>'
+                'Avg monthly: $%{customdata[0]:,.0f}<br>'
+                'Std dev: $%{customdata[1]:,.0f}'
+                '<extra></extra>'
+            ),
+            customdata=stats[['mean_spending', 'std_spending']].values,
+        )
+    )
+
+    fig.update_layout(
+        **PLOTLY_THEME,
+        height=600,
+        margin=dict(t=40, b=40, l=140, r=60),
+    )
+
+    fig.update_yaxes(autorange='reversed') # high volatility at top
+    fig.update_xaxes(gridcolor='#1e2230')
+
+    return fig
