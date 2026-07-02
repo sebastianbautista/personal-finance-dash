@@ -10,7 +10,7 @@ from dash import dcc, html, Input, Output
 # import panel layout functions that return html.Div trees
 # (placeholder for now)
 from panels.cashflow import cashflow_layout
-from panels.networth import networth_layout
+from panels.budget import budget_layout
 
 # 1. App instantiation ----
 # suppress_callback_exceptions=True because panel layouts are
@@ -197,7 +197,7 @@ app.layout = html.Div([
             html.Div('panel', className='sidebar-label'),
             html.Div([
                 html.Button('Cash Flow', id='tab-cashflow', className='tab-btn active', n_clicks=0),
-                html.Button('Net Worth', id='tab-networth', className='tab-btn',        n_clicks=0)
+                html.Button('Budget', id='tab-budget', className='tab-btn',        n_clicks=0)
             ], style={'display': 'flex', 'flexDirection': 'column', 'gap': '4px'}),
         ], className='sidebar'),
 
@@ -215,18 +215,18 @@ app.layout = html.Div([
 @app.callback(
     Output('panel-content', 'children'),
     Output('tab-cashflow', 'className'),
-    Output('tab-networth', 'className'),
+    Output('tab-budget', 'className'),
     Input('tab-cashflow', 'n_clicks'),
-    Input('tab-networth', 'n_clicks'),
+    Input('tab-budget', 'n_clicks'),
 )
-def render_panel(n_cashflow, n_networth):
+def render_panel(n_cashflow, n_budget):
     # dash.ctx.triggered_id points to which input fired callback
     # on first load, nothing is clicked so triggered_id is None
     # this defaults to cashflow panel
     triggered = dash.ctx.triggered_id
 
-    if triggered == 'tab-networth':
-        return networth_layout(), 'tab-btn', 'tab-btn active'
+    if triggered == 'tab-budget':
+        return budget_layout(), 'tab-btn', 'tab-btn active'
     else:
         return cashflow_layout(), 'tab-btn active', 'tab-btn'
 
