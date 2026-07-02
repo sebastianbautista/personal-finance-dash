@@ -86,7 +86,16 @@ def _budget_status(analysis_df, min_transactions=10):
 
     budgets = complete_months.groupby('category')['spending'].mean().rename('budget')
 
-    # join budget back onto full monthly series ----
+    # restrict to the same window used to compute budget ----
+    # comparing months from before budget start is apples-to-oranges
+    # here we only evaluate status within the same 12-mo window the budget 
+    # itself was built from
+    monthly = monthly[
+        (monthly['month'] >= twelve_months_ago) &
+        (monthly['month'] < current_month)
+    ]
+
+    # join budget back onto restricted monthly series ----
     monthly = monthly.merge(budgets, on='category', how='left')
 
     # drop rows if budget wasn't computed
@@ -146,6 +155,61 @@ def _roll_rate_matrix(analysis_df, min_transactions=10):
 
     return matrix
 
+def _category_over_persistence(analysis_df, min_transactions=10, min_over_observations=3):
+    """
+    Per-category 'overbudget' persistence rate: given a category was overbudget this month,
+    what fraction of the time was it also overbudget the following month?
+
+    Category-level counterpart to the pooled _roll_rate_matrix
+    Shows which specific categories are prone to persistent overspending vs. which self-correct (cure)
+
+    Parameters
+    ----------
+    analysis_df : pd.DataFrame 
+    min_transactions : int - same sparsity cutoff used elsewhere
+    min_over_transactions : int - categories with fewer than this many 'over' months are excluded
+
+    Returns
+    -------
+    pd.DataFrame - columns: category, over_persistence, n_over_observations
+    sorted by over_persistence desc
+    """
+    status_df = _budget_status(analysis_df, min_transactions)
+    status_df = status_df.sort_values(['category', 'month'])
+
+    status_df['next_status'] = status_df.groupby('category')['status'].shift(-1)
+    status_df['next_month'] = status_df.groupby('category')['month'].shift(-1)
+
+    gap_series = status_df['next_month'] - status_df['month']
+    status_df['month_gap'] = gap_series.map(lambda x: x.n, na_action='ignore')
+    status_df = status_df[status_df['month_gap'] == 1]
+
+    # keep only rows where this month was 'over' ----
+    # specifically measuring transitions from over, not from under
+    over_rows = status_df[status_df['status'] == 'over']
+
+    # per category: what fraction of 'over' months were followed by another 'over'? ----
+    persistence = (
+        over_rows
+        .groupby('category')['next_status']
+        .apply(lambda s: (s == 'over').mean())
+        .rename('over_persistence')
+    )
+
+    n_observations = over_rows.groupby('category').size().rename('n_over_observations')
+
+    # joins on index (both are based on over_rows.groupby('category'))
+    # need to_frame() because Series don't have a .join method
+    # had pd.concat(..., axis=1) earlier but this is more explicit wrt index
+    result = persistence.to_frame().join(n_observations).reset_index()
+
+    # filter out categories with too few 'over' obs to be reliable ----
+    result = result[result['n_over_observations'] >= min_over_observations]
+
+    result = result.sort_values('over_persistence', ascending=False)
+
+    return result 
+
 
 # 2. Layout ----
 
@@ -168,6 +232,7 @@ def budget_layout():
         # main content
         html.Div([
             _chart_card('bg-transition-matrix', 'Budget Roll-Rate Transition Matrix'),
+            _chart_card('bg-persistence-chart', 'Category Over-Budget Persistence (trailing 12mo)'),
         ], className='main-content'),
 
     ], className='panel-grid')
@@ -220,4 +285,54 @@ def update_transition_matrix(category_filter):
 
     return fig
 
-    
+
+@callback(
+    Output('bg-persistence-chart', 'figure'),
+    Input('bg-category-filter', 'value'), # ignored for now
+)
+def update_persistence_chart(category_filter):
+    """
+    Per-category over-budget persistence rate, restricted to the same 
+    12-month window used to compute each category's budget
+    Bar opacity reflects observation count since some have very few 'over' months
+    """
+    from data import load_data
+
+    _, analysis_df = load_data()
+    result = _category_over_persistence(analysis_df)
+
+    # opacity scales from 0.4 (few obs) to 1.0 (more)
+    # so thin-sample categories are visually de-emphasized without hiding
+    max_obs = result['n_over_observations'].max()
+    opacities = 0.4 + 0.6 * (result['n_over_observations'] / max_obs)
+
+    # horizontal bar plot, so value on x and category on y
+    fig = go.Figure(
+        go.Bar(
+            x=result['over_persistence'],
+            y=result['category'],
+            orientation='h',
+            marker=dict(color='#A89FD8', opacity=opacities),
+            text=[f'{p:.0%} (n={n})' for p, n in
+                  zip(result['over_persistence'], result['n_over_observations'])],
+            textposition='outside',
+            hovertemplate=(
+                '%{y}<br>'
+                'Over-persistence: %{x:.0%}<br>'
+                'Based on %{customdata} months over budget'
+                '<extra></extra>'
+            ),
+            customdata=result['n_over_observations']
+        )
+    )
+
+    fig.update_layout(
+        **PLOTLY_THEME,
+        height=400,
+        margin=dict(t=40, b=40, l=140, r=100)
+    )
+
+    fig.update_yaxes(autorange='reversed')
+    fig.update_xaxes(tickformat='.0%', gridcolor='#1e2230', range=[0, 1.15])
+
+    return fig
