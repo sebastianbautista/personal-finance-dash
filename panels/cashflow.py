@@ -217,16 +217,19 @@ def _stl_data(analysis_df, trailing_months):
         .reset_index()
     )
     monthly.columns = ['month', 'spending']
-    monthly['month'] = monthly['month'].dt.to_timestamp()
 
     # exclude partial first month (Nov 2023) ----
-    monthly = monthly[monthly['month'] >= '2023-12-01'].copy()
+    monthly = monthly[monthly['month'] >= pd.Period('2023-12', freq='M')].copy()
 
     # apply trailing months filter ----
     if trailing_months != 0:
-        now = pd.Timestamp.now()
-        cutoff = now - pd.DateOffset(months=trailing_months)
+        current_month = pd.Timestamp.now().to_period('M')
+        cutoff = current_month - trailing_months
         monthly = monthly[monthly['month'] >= cutoff].copy()
+
+    # convert to timestamp moved later due to date arithmetic issues
+    # need Timestamp for Plotly/STL
+    monthly['month'] = monthly['month'].dt.to_timestamp()
 
     # STL needs at least 2 full seasonal cycles (here years) to decompose ----
     # if filtered series is too short, return None
