@@ -10,7 +10,7 @@ from dash import dcc, html, Input, Output, callback
 import plotly.graph_objects as go
 
 # reuse same theme as panel A
-from panels.cashflow import PLOTLY_THEME, _chart_card, _empty_fig
+from panels.cashflow import PLOTLY_THEME, _chart_card, _kpi_card, _empty_fig
 
 # 1. Data aggregation helpers ----
 
@@ -155,6 +155,7 @@ def _roll_rate_matrix(analysis_df, min_transactions=10):
 
     return matrix
 
+
 def _category_over_persistence(analysis_df, min_transactions=10, min_over_observations=3):
     """
     Per-category 'overbudget' persistence rate: given a category was overbudget this month,
@@ -211,6 +212,53 @@ def _category_over_persistence(analysis_df, min_transactions=10, min_over_observ
     return result 
 
 
+def _spending_runway(analysis_df, cash_balance, bucket=None, trailing_months=12):
+    """
+    Estimate how many months a given cash balance would sustain spending
+    using the trailing n-month average as the monthly burn rate
+
+    Parameters
+    ----------
+    analysis_df : pd.DataFrame
+    cash_balance : float or None - user-provided balance; default None
+    bucket : str or None - 'wants' for discretionary-only runway, 'needs' for
+                            essential only, None for total spending (all buckets)
+    trailing_months : int - window for computing average monthly spending, defaults to 12
+                            for consistency with budget baseline
+    
+    Returns
+    -------
+    float or None - estimated months of runway; None if cash_balance not provided or
+        if monthly spending is 0
+    """
+
+    if cash_balance is None or cash_balance <= 0:
+        return None
+
+    expenses = analysis_df[analysis_df['type'] == 'Expense'].copy()
+
+    if bucket is not None:
+        expenses = expenses[expenses['bucket'] == bucket.title()]
+
+    current_month = pd.Timestamp.now().to_period('M')
+    cutoff = current_month - trailing_months
+    
+    expenses['month'] = expenses['date'].dt.to_period('M')
+    expenses = expenses[(expenses['month'] >= cutoff) & (expenses['month'] < current_month)]
+
+    monthly_spending = expenses.groupby('month')['amount'].sum().abs()
+
+    if len(monthly_spending) == 0:
+        return None
+    
+    avg_monthly_spending = monthly_spending.mean()
+
+    if avg_monthly_spending == 0:
+        return None
+
+    return cash_balance / avg_monthly_spending
+
+
 # 2. Layout ----
 
 def budget_layout():
@@ -226,11 +274,34 @@ def budget_layout():
                 multi=True,
                 placeholder='All categories',
                 style=(dict(fontSize='12px'))
-            )
+            ),
+            html.Div('Current Cash Balance', className='sidebar-label'),
+            dcc.Input(
+                id='bg-cash-balance',
+                type='number',
+                placeholder='Enter amount ($)',
+                value=None,
+                style=dict(
+                    width='100%',
+                    fontSize='12px',
+                    padding='6px',
+                    background='var(--surf2)',
+                    color='var(--text)',
+                    border='1px solid var(--border)',
+                    borderRadius='4px'
+                ),
+            ),
         ], className='sidebar'),
 
         # main content
         html.Div([
+            # KPI row - separate nested div, own className
+            html.Div([
+                _kpi_card('bg-runway-total', 'Total Runway (months)'),
+                _kpi_card('bg-runway-discretionary', 'Discretionary Runway (months)'),
+            ], className='kpi-grid'),
+
+            # chart cards - separate divs, each with chart-card styling
             _chart_card('bg-transition-matrix', 'Budget Roll-Rate Transition Matrix'),
             _chart_card('bg-persistence-chart', 'Category Over-Budget Persistence (trailing 12mo)'),
         ], className='main-content'),
@@ -336,3 +407,27 @@ def update_persistence_chart(category_filter):
     fig.update_xaxes(tickformat='.0%', gridcolor='#1e2230', range=[0, 1.15])
 
     return fig
+
+
+@callback(
+    Output('bg-runway-total', 'children'),
+    Output('bg-runway-discretionary', 'children'),
+    Input('bg-cash-balance', 'value')
+)
+def update_runway(cash_balance):
+    """
+    Updates both runway KPI cards from a single cash_balance input
+    Total runway uses all expenses; discretionary uses wants only
+    """
+    from data import load_data
+
+    _, analysis_df = load_data()
+
+    total_runway = _spending_runway(analysis_df, cash_balance, bucket=None)
+    discretionary_runway = _spending_runway(analysis_df, cash_balance, bucket='Wants')
+
+    total_text = f'{total_runway:.1f}' if total_runway is not None else '-'
+    discretionary_text = f'{discretionary_runway:.1f}' if discretionary_runway is not None else '-'
+
+    return total_text, discretionary_text
+
