@@ -212,17 +212,23 @@ def _category_over_persistence(analysis_df, min_transactions=10, min_over_observ
     return result 
 
 
-def _spending_runway(analysis_df, cash_balance, bucket=None, trailing_months=12):
+def _spending_runway(analysis_df, cash_balance, wants_factor=1.0, trailing_months=12):
     """
     Estimate how many months a given cash balance would sustain spending
     using the trailing n-month average as the monthly burn rate
+
+    Needs spending is always included in full. Wants spending is scaled by wants_factor,
+    letting one function express three scenarios:
+      - wants_factor=1.0 -> Total Runway (current pace, no changes)
+      - wants_factor=0.25 -> Reduced Runway (cut Wants to 25% of average, more realistic
+        belt-tightening than assuming 0)
+      - wants_factor=0.0 -> Needs-Only Runway (theoretical floor, 0 discretionary spending)
 
     Parameters
     ----------
     analysis_df : pd.DataFrame
     cash_balance : float or None - user-provided balance; default None
-    bucket : str or None - 'wants' for discretionary-only runway, 'needs' for
-                            essential only, None for total spending (all buckets)
+    wants_factor : float - fraction of average Wants spending to include, 0.0 to 1.0
     trailing_months : int - window for computing average monthly spending, defaults to 12
                             for consistency with budget baseline
     
@@ -237,21 +243,23 @@ def _spending_runway(analysis_df, cash_balance, bucket=None, trailing_months=12)
 
     expenses = analysis_df[analysis_df['type'] == 'Expense'].copy()
 
-    if bucket is not None:
-        expenses = expenses[expenses['bucket'] == bucket.title()]
-
     current_month = pd.Timestamp.now().to_period('M')
     cutoff = current_month - trailing_months
     
     expenses['month'] = expenses['date'].dt.to_period('M')
     expenses = expenses[(expenses['month'] >= cutoff) & (expenses['month'] < current_month)]
 
-    monthly_spending = expenses.groupby('month')['amount'].sum().abs()
+    # needs: always full amount ----
+    needs = expenses[expenses['bucket'] == 'Needs']
+    monthly_needs = needs.groupby('month')['amount'].sum().abs()
+    avg_needs = monthly_needs.mean() if len(monthly_needs) > 0 else 0
 
-    if len(monthly_spending) == 0:
-        return None
-    
-    avg_monthly_spending = monthly_spending.mean()
+    # wants: scaled by wants_factor ----
+    wants = expenses[expenses['bucket'] == 'Wants']
+    monthly_wants = wants.groupby('month')['amount'].sum().abs()
+    avg_wants = monthly_wants.mean() if len(monthly_wants) > 0 else 0
+
+    avg_monthly_spending = avg_needs + (avg_wants * wants_factor)
 
     if avg_monthly_spending == 0:
         return None
@@ -298,7 +306,8 @@ def budget_layout():
             # KPI row - separate nested div, own className
             html.Div([
                 _kpi_card('bg-runway-total', 'Total Runway (months)'),
-                _kpi_card('bg-runway-discretionary', 'Discretionary Runway (months)'),
+                _kpi_card('bg-runway-reduced', 'Reduced Runway (months)'),
+                _kpi_card('bg-runway-floor', 'Needs-Only Floor (months)'),
             ], className='kpi-grid'),
 
             # chart cards - separate divs, each with chart-card styling
@@ -411,23 +420,25 @@ def update_persistence_chart(category_filter):
 
 @callback(
     Output('bg-runway-total', 'children'),
-    Output('bg-runway-discretionary', 'children'),
-    Input('bg-cash-balance', 'value')
+    Output('bg-runway-reduced', 'children'),
+    Output('bg-runway-floor', 'children'),
+    Input('bg-cash-balance', 'value'),
 )
 def update_runway(cash_balance):
     """
-    Updates both runway KPI cards from a single cash_balance input
-    Total runway uses all expenses; discretionary uses wants only
+    Updates all three runway KPI cards from a single cash_balance input
+    Three scenarios: full current pace, 25%-of-wants belt-tightening, theoretical needs-only floor
     """
     from data import load_data
 
     _, analysis_df = load_data()
 
-    total_runway = _spending_runway(analysis_df, cash_balance, bucket=None)
-    discretionary_runway = _spending_runway(analysis_df, cash_balance, bucket='Wants')
+    total_runway = _spending_runway(analysis_df, cash_balance, wants_factor=1.0)
+    reduced_runway = _spending_runway(analysis_df, cash_balance, wants_factor=0.25)
+    floor_runway = _spending_runway(analysis_df, cash_balance, wants_factor=0.0)
 
-    total_text = f'{total_runway:.1f}' if total_runway is not None else '-'
-    discretionary_text = f'{discretionary_runway:.1f}' if discretionary_runway is not None else '-'
+    def fmt(v):
+        return f'{v:.1f}' if v is not None else '-'
 
-    return total_text, discretionary_text
+    return fmt(total_runway), fmt(reduced_runway), fmt(floor_runway)
 
