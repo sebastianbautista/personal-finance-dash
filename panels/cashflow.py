@@ -11,7 +11,7 @@ import pandas as pd
 from dash import dcc, html, Input, Output, callback
 import plotly.graph_objects as go
 
-from theme import COLORS, PLOTLY_THEME
+from theme import COLORS, PLOTLY_THEME, PALETTES, get_plotly_theme
 
 # 1. Helper: empty placeholder figure (_empty_fig()) ----
 # returns a blank plotly fig with dark theme applied
@@ -120,6 +120,7 @@ def cashflow_layout():
                     inline=True,
                     style=dict(fontSize='11px', marginBottom='8px', color='var(--muted)'),
                     inputStyle=dict(marginRight='4px', marginLeft='8px'),
+                    labelStyle=dict(color='var(--text)'),
                 ),
                 dcc.Graph(
                     id='cf-heatmap',
@@ -437,9 +438,10 @@ def _volatility_data(analysis_df, trailing_months, min_transactions=10):
 # change the cf-waterfall figure based on the value of cf-trailing-months
 @callback(
     Output('cf-waterfall', 'figure'), # component_id, component_property
-    Input('cf-trailing-months', 'value')
+    Input('cf-trailing-months', 'value'),
+    Input('store-palette', 'data') # reads selected palette from global store
 )
-def update_waterfall(trailing_months):
+def update_waterfall(trailing_months, palette):
     """
     Fires when the trailing months dropdown changes, rebuilding the waterfall fig each time
     
@@ -448,6 +450,9 @@ def update_waterfall(trailing_months):
     Outputs are component properties that get updated with return value (output = f(inputs))
     """
     from data import load_data # avoiding circular imports at module level
+
+    colors = PALETTES.get(palette, COLORS)
+    plotly_theme = get_plotly_theme(palette)
 
     _, analysis_df = load_data()
 
@@ -465,21 +470,21 @@ def update_waterfall(trailing_months):
             y            = wd['y'],
             text         = wd['text'],
             textposition = 'outside',
-            increasing   = dict(marker=dict(color=COLORS['accent'])), # green for pos
-            decreasing   = dict(marker=dict(color=COLORS['danger'])), # red for neg
-            totals       = dict(marker=dict(color=COLORS['accentB'])), # purple for net
-            connector    = dict(line=dict(color=COLORS['border'], width=1)), # border color
+            increasing   = dict(marker=dict(color=colors['accent'])), # green for pos
+            decreasing   = dict(marker=dict(color=colors['danger'])), # red for neg
+            totals       = dict(marker=dict(color=colors['accentB'])), # purple for net
+            connector    = dict(line=dict(color=colors['border'], width=1)), # border color
         )
     )
 
     fig.update_layout(
-        **PLOTLY_THEME,
+        **plotly_theme,
         height = 400,
         margin = dict(t=40, b=40, l=40, r=40),
     )
 
-    fig.update_yaxes(tickprefix='$', tickformat=',.0f', gridcolor=COLORS['gridline'], showgrid=True)
-    fig.update_xaxes(gridcolor=COLORS['gridline'], showgrid=False)
+    fig.update_yaxes(tickprefix='$', tickformat=',.0f', gridcolor=colors['gridline'], showgrid=True)
+    fig.update_xaxes(gridcolor=colors['gridline'], showgrid=False)
 
     return fig
 
@@ -487,9 +492,10 @@ def update_waterfall(trailing_months):
 # again, figure depends on value of trailing months
 @callback(
     Output('cf-stl', 'figure'),
-    Input('cf-trailing-months', 'value')
+    Input('cf-trailing-months', 'value'),
+    Input('store-palette', 'data'), # reads selected palette from global store
 )
-def update_stl(trailing_months):
+def update_stl(trailing_months, palette):
     """
     STL decomposition of monthly spending
     Shows trend, seasonal, and residual components as subplots
@@ -499,6 +505,9 @@ def update_stl(trailing_months):
     from data import load_data
     from plotly.subplots import make_subplots
 
+    colors = PALETTES.get(palette, COLORS)
+    plotly_theme = get_plotly_theme(palette)
+
     _, analysis_df = load_data()
     monthly = _stl_data(analysis_df, trailing_months)
 
@@ -506,10 +515,10 @@ def update_stl(trailing_months):
     if monthly is None:
         fig = go.Figure()
         fig.update_layout(
-            **PLOTLY_THEME,
+            **plotly_theme,
             height=400,
             title=dict(text='Not enough data for STL (need 24+ months)',
-                    font=dict(color=COLORS['muted']))
+                    font=dict(color=colors['muted']))
         )
         return fig
 
@@ -531,7 +540,7 @@ def update_stl(trailing_months):
             x=monthly['month'],
             y=monthly['trend'],
             mode='lines',
-            line=dict(color=COLORS['accent'], width=2),
+            line=dict(color=colors['accent'], width=2),
             name='Trend',
             hovertemplate='%{x|%b %Y}: $%{y:,.0f}<extra></extra>' # last bit suppresses default trace name in hover box
         ),
@@ -548,7 +557,7 @@ def update_stl(trailing_months):
             marker=dict(
                 color=monthly['seasonal'],
                 # maps values to colors
-                colorscale=[[0, COLORS['danger']], [0.5, COLORS['border']], [1, COLORS['accent']]],
+                colorscale=[[0, colors['danger']], [0.5, colors['border']], [1, colors['accent']]],
                 cmid=0, # center colorscale at 0
             ),
             name='Seasonal',
@@ -565,7 +574,7 @@ def update_stl(trailing_months):
             y=monthly['residual'],
             marker=dict(
                 color=monthly['residual'],
-                colorscale=[[0, COLORS['danger']], [0.5, COLORS['border']], [1, COLORS['accent']]],
+                colorscale=[[0, colors['danger']], [0.5, colors['border']], [1, colors['accent']]],
                 cmid=0
             ),
             name='Residual',
@@ -576,14 +585,14 @@ def update_stl(trailing_months):
 
     # apply theme ----
     fig.update_layout(
-        **PLOTLY_THEME,
+        **plotly_theme,
         height=600,
         showlegend=False,
         margin=dict(t=40, b=40, l=40, r=40)
     )
 
-    fig.update_yaxes(tickprefix='$', tickformat=',.0f', gridcolor=COLORS['gridline'])
-    fig.update_xaxes(gridcolor=COLORS['gridline'], showgrid=False)
+    fig.update_yaxes(tickprefix='$', tickformat=',.0f', gridcolor=colors['gridline'])
+    fig.update_xaxes(gridcolor=colors['gridline'], showgrid=False)
 
     return fig
 
@@ -593,9 +602,10 @@ def update_stl(trailing_months):
 @callback(
     Output('cf-heatmap', 'figure'),
     Input('cf-trailing-months', 'value'),
-    Input('cf-heatmap-scale', 'value')
+    Input('cf-heatmap-scale', 'value'),
+    Input('store-palette', 'data'), # reads selected palette from global store
 )
-def update_heatmap(trailing_months, scale_mode):
+def update_heatmap(trailing_months, scale_mode, palette):
     """
     Heatmap of average spendding by category x month-of-year
     Shows recurring seasonal patterns 
@@ -605,6 +615,9 @@ def update_heatmap(trailing_months, scale_mode):
     Equivalent to geom_tile() in ggplot with fill = value
     """
     from data import load_data
+
+    colors = PALETTES.get(palette, COLORS)
+    plotly_theme = get_plotly_theme(palette)
 
     _, analysis_df = load_data()
     pivot_raw, pivot_normalized = _heatmap_data(analysis_df, trailing_months)
@@ -616,7 +629,7 @@ def update_heatmap(trailing_months, scale_mode):
         z_values = pivot_normalized.values
         # diverging colorscale - green (negative z, low spending) to red (+, high)
         # plotly colorscales are always defined on normalized [0, 1] domain
-        colorscale = [[0, COLORS['accent']], [0.5, COLORS['surf2']], [1, COLORS['danger']]]
+        colorscale = [[0, colors['accent']], [0.5, colors['surf2']], [1, colors['danger']]]
         zmid = 0 # anchors diverging colorscale at 0
         colorbar_title = 'σ' # sigma for std
 
@@ -645,7 +658,7 @@ def update_heatmap(trailing_months, scale_mode):
     else:
         z_values = pivot_raw.values
         # single-direction colorscale since spending is >= 0
-        colorscale = [[0, COLORS['surf2']], [1, COLORS['accent']]]
+        colorscale = [[0, colors['surf2']], [1, colors['accent']]]
         zmid = None # not used for single-direction
         colorbar_title = '$'
         customdata = None
@@ -674,7 +687,7 @@ def update_heatmap(trailing_months, scale_mode):
     fig = go.Figure(go.Heatmap(**heatmap_kwargs))
 
     fig.update_layout(
-        **PLOTLY_THEME,
+        **plotly_theme,
         height=600,
         margin=dict(t=40, b=40, l=120, r=40) # l=120 gives category labels room
     )
@@ -689,7 +702,7 @@ def update_heatmap(trailing_months, scale_mode):
         type='line',
         x0=0, x1=1, xref='paper', # 'paper' spans full width regardless of x-axis units
         y0=0.5, y1=0.5, yref='y',
-        line=dict(color=COLORS['border2'], width=2),
+        line=dict(color=colors['border2'], width=2),
     )
 
     return fig
@@ -697,9 +710,10 @@ def update_heatmap(trailing_months, scale_mode):
 
 @callback(
     Output('cf-vs-avg', 'figure'),
+    Input('store-palette', 'data'), # reads selected palette from global store
     Input('cf-trailing-months', 'value') # included for consistency but ignored
 )
-def update_vs_avg(trailing_months):
+def update_vs_avg(trailing_months, palette):
     """
     Bar chart: current month's prorated spending vs trailing 3-month average,
     by category, ranked by deviation. Shows any categories running hot or cold
@@ -709,18 +723,21 @@ def update_vs_avg(trailing_months):
     """
     from data import load_data
 
+    colors = PALETTES.get(palette, COLORS)
+    plotly_theme = get_plotly_theme(palette)
+
     _, analysis_df = load_data()
     comparison = _vs_avg_data(analysis_df)
 
     # color bars by direction: red = higher than usual, green = lower
-    colors = [COLORS['danger'] if d > 0 else COLORS['accent'] for d in comparison['deviation']] 
+    bar_colors = [colors['danger'] if d > 0 else colors['accent'] for d in comparison['deviation']] 
 
     fig = go.Figure(
         go.Bar(
             x=comparison['deviation'],
             y=comparison['category'],
             orientation='h', # easier to read category names horizontally
-            marker=dict(color=colors),
+            marker=dict(color=bar_colors),
             text=[f'${d:+,.0f}' for d in comparison['deviation']], # + sign shows direction explicitly
             textposition='outside',
             hovertemplate=(
@@ -735,13 +752,13 @@ def update_vs_avg(trailing_months):
     )
 
     fig.update_layout(
-        **PLOTLY_THEME,
+        **plotly_theme,
         height=600,
         margin=dict(t=40, b=40, l=140, r=60) # l=140 for category label room
     )
 
     fig.update_yaxes(autorange='reversed') # largest positive deviation at top
-    fig.update_xaxes(tickprefix='$', tickformat=',.0f', gridcolor=COLORS['gridline'])
+    fig.update_xaxes(tickprefix='$', tickformat=',.0f', gridcolor=colors['gridline'])
 
     return fig
 
@@ -803,13 +820,17 @@ def update_kpis(trailing_months):
 @callback(
     Output('cf-volatility', 'figure'),
     Input('cf-trailing-months', 'value'),
+    Input('store-palette', 'data'), # reads selected palette from global store
 )
-def update_volatility(trailing_months):
+def update_volatility(trailing_months, palette):
     """
     Horizontal bar chart of spending volatility (CV) by category
     Most erratic at top, stable at bottom
     """
     from data import load_data
+
+    colors = PALETTES.get(palette, COLORS)
+    plotly_theme = get_plotly_theme(palette)
 
     _, analysis_df = load_data()
     stats = _volatility_data(analysis_df, trailing_months)
@@ -820,7 +841,7 @@ def update_volatility(trailing_months):
             x=stats['cv'],
             y=stats['category'],
             orientation='h',
-            marker=dict(color=COLORS['accentB']),
+            marker=dict(color=colors['accentB']),
             text=[f'{cv:.2f}' for cv in stats['cv']],
             textposition='outside',
             hovertemplate=(
@@ -835,12 +856,12 @@ def update_volatility(trailing_months):
     )
 
     fig.update_layout(
-        **PLOTLY_THEME,
+        **plotly_theme,
         height=600,
         margin=dict(t=40, b=40, l=140, r=60),
     )
 
     fig.update_yaxes(autorange='reversed') # high volatility at top
-    fig.update_xaxes(gridcolor=COLORS['gridline'])
+    fig.update_xaxes(gridcolor=colors['gridline'])
 
     return fig

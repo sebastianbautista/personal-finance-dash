@@ -191,6 +191,7 @@ app.index_string = f"""<!DOCTYPE html>
 app.layout = html.Div([
     dcc.Location(id='url', refresh=False),
     dcc.Store(id='store-data'), # for data caching later
+    dcc.Store(id='store-palette', data='default'),  # holds 'default' or 'colorblind'
 
     html.Div([
         # sidebar
@@ -201,6 +202,19 @@ app.layout = html.Div([
                 html.Button('Cash Flow', id='tab-cashflow', className='tab-btn active', n_clicks=0),
                 html.Button('Budget', id='tab-budget', className='tab-btn',        n_clicks=0)
             ], style={'display': 'flex', 'flexDirection': 'column', 'gap': '4px'}),
+
+            html.Div('Color Palette', className='sidebar-label'),
+            dcc.RadioItems(
+                id='palette-toggle',
+                options=[
+                    dict(label='Default',    value='default'),
+                    dict(label='Colorblind', value='colorblind'),
+                ],
+                value='default',
+                style=dict(fontSize='11px', color='var(--muted)'),
+                inputStyle=dict(marginRight='4px', marginLeft='8px'),
+                labelStyle=dict(color='var(--text)'),
+            ),
         ], className='sidebar'),
 
         # main content
@@ -231,6 +245,14 @@ def render_panel(n_cashflow, n_budget):
         return budget_layout(), 'tab-btn', 'tab-btn active'
     else:
         return cashflow_layout(), 'tab-btn active', 'tab-btn'
+
+
+@app.callback(
+    Output('store-palette', 'data'),
+    Input('palette-toggle', 'value')
+)
+def update_palette_store(selected_palette):
+    return selected_palette
 
 
 # 5. Run ----

@@ -10,7 +10,7 @@ from dash import dcc, html, Input, Output, callback
 import plotly.graph_objects as go
 
 # reuse same theme as panel A
-from theme import COLORS, PLOTLY_THEME
+from theme import COLORS, PLOTLY_THEME, PALETTES, get_plotly_theme
 from panels.cashflow import _chart_card, _kpi_card
 
 # 1. Data aggregation helpers ----
@@ -323,15 +323,19 @@ def budget_layout():
 
 @callback(
     Output('bg-transition-matrix', 'figure'),
+    Input('store-palette', 'data'), # reads selected palette from global store
     Input('bg-category-filter', 'value') # placeholder
 )
-def update_transition_matrix(category_filter):
+def update_transition_matrix(category_filter, palette):
     """
     Heatmap visualization of the over/under budget transition matrix
     Rows = this month's status, columns = next month's status
     cell value = transition probability
     """
     from data import load_data
+
+    colors = PALETTES.get(palette, COLORS)
+    plotly_theme = get_plotly_theme(palette)
 
     _, analysis_df = load_data()
     matrix = _roll_rate_matrix(analysis_df)
@@ -341,11 +345,11 @@ def update_transition_matrix(category_filter):
             z=matrix.values,
             x=matrix.columns,
             y=matrix.index,
-            colorscale=[[0, COLORS['surf2']], [1, '#A89FD8']],
+            colorscale=[[0, colors['surf2']], [1, colors['accentB']]],
             zmin=0, zmax=1, # fixed scale for probabilities
             text=matrix.values,
             texttemplate='%{text:.1%}', # show percentage on each cell
-            textfont=dict(size=16, color=COLORS['text']),
+            textfont=dict(size=16, color=colors['text']),
             colorbar=dict(
                 title=dict(text='Probability', side='right'),
                 tickformat='.0%',
@@ -356,7 +360,7 @@ def update_transition_matrix(category_filter):
     )
 
     fig.update_layout(
-        **PLOTLY_THEME,
+        **plotly_theme,
         height=400,
         margin=dict(t=40, b=40, l=100, r=40)
     )
@@ -369,15 +373,19 @@ def update_transition_matrix(category_filter):
 
 @callback(
     Output('bg-persistence-chart', 'figure'),
+    Input('store-palette', 'data'), # reads selected palette from global store
     Input('bg-category-filter', 'value'), # ignored for now
 )
-def update_persistence_chart(category_filter):
+def update_persistence_chart(category_filter, palette):
     """
     Per-category over-budget persistence rate, restricted to the same 
     12-month window used to compute each category's budget
     Bar opacity reflects observation count since some have very few 'over' months
     """
     from data import load_data
+
+    colors = PALETTES.get(palette, COLORS)
+    plotly_theme = get_plotly_theme(palette)
 
     _, analysis_df = load_data()
     result = _category_over_persistence(analysis_df)
@@ -393,7 +401,7 @@ def update_persistence_chart(category_filter):
             x=result['over_persistence'],
             y=result['category'],
             orientation='h',
-            marker=dict(color='#A89FD8', opacity=opacities),
+            marker=dict(color=colors['accentB'], opacity=opacities),
             text=[f'{p:.0%} (n={n})' for p, n in
                   zip(result['over_persistence'], result['n_over_observations'])],
             textposition='outside',
@@ -408,13 +416,13 @@ def update_persistence_chart(category_filter):
     )
 
     fig.update_layout(
-        **PLOTLY_THEME,
+        **plotly_theme,
         height=400,
         margin=dict(t=40, b=40, l=140, r=100)
     )
 
     fig.update_yaxes(autorange='reversed')
-    fig.update_xaxes(tickformat='.0%', gridcolor='#1e2230', range=[0, 1.15])
+    fig.update_xaxes(tickformat='.0%', gridcolor=colors['gridline'], range=[0, 1.15])
 
     return fig
 
