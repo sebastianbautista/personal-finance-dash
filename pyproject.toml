@@ -8,4 +8,10 @@ dependencies = [
     "dash>=4.3.0",
     "pandas>=3.0.3",
     "plotly>=6.8.0",
+    "statsmodels>=0.14.6",
+]
+
+[dependency-groups]
+dev = [
+    "matplotlib>=3.11.0",
 ]
