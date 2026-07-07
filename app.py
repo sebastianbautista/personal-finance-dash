@@ -7,8 +7,8 @@
 import dash
 from dash import dcc, html, Input, Output
 
-# import panel layout functions that return html.Div trees
-# (placeholder for now)
+# import theme and panel layout functions that return html.Div trees
+from theme import COLORS
 from panels.cashflow import cashflow_layout
 from panels.budget import budget_layout
 
@@ -21,23 +21,25 @@ app = dash.Dash(__name__, suppress_callback_exceptions=True)
 server = app.server # exposed for possible deployment later on
 
 # 2. CSS and global styles ----
-# just pasting this from earlier template
+# generating this dynamically from theme.COLORS
+# replace the :root block with an f-string and inject into existing CSS
 
-CSS = """
-:root {
-    --bg:      #0b0c0e;
-    --surface: #13151a;
-    --surf2:   #1b1e26;
-    --border:  #2a2e3a;
-    --border2: #363b4a;
-    --text:    #dde0e8;
-    --muted:   #6b7080;
-    --accent:  #7EB8A4;
-    --accentB: #A89FD8;
-    --warn:    #C8A96E;
-    --danger:  #C87070;
-}
+# double {{}} (literals) to escape f-string {} placeholder
+CSS_ROOT = f""":root{{
+    --bg:      {COLORS['bg']};
+    --surface: {COLORS['surface']};
+    --surf2:   {COLORS['surf2']};
+    --border:  {COLORS['border']};
+    --border2: {COLORS['border2']};
+    --text:    {COLORS['text']};
+    --muted:   {COLORS['muted']};
+    --accent:  {COLORS['accent']};
+    --accentB: {COLORS['accentB']};
+    --warn:    {COLORS['warn']};
+    --danger:  {COLORS['danger']};
+}}"""
 
+CSS = CSS_ROOT +  """
 * { box-sizing: border-box; margin: 0; padding: 0; } 
 
 body {

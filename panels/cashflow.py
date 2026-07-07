@@ -4,25 +4,19 @@
 # layout function returns full panel including sidebar controls
 # callbacks to be added after layout confirmed working
 
+import calendar
+
 import numpy as np
 import pandas as pd
-import calendar
 from dash import dcc, html, Input, Output, callback
 import plotly.graph_objects as go
 
-# 1. Helper: empty placeholder figure (PLOTLY_THEME and _empty_fig()) ----
+from theme import COLORS, PLOTLY_THEME
+
+# 1. Helper: empty placeholder figure (_empty_fig()) ----
 # returns a blank plotly fig with dark theme applied
 # used for standin until callbacks finished
 # defined here so placeholders look consistent
-
-PLOTLY_THEME = dict(
-    paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(family="DM Mono, monospace", size=11, color="#9aa0b0"),
-    xaxis=dict(gridcolor="#1e2230", showgrid=True),
-    yaxis=dict(gridcolor="#1e2230", showgrid=True),
-    hoverlabel=dict(bgcolor='#1b1e26', font=dict(color='#dde0e8')),  # consistent tooltip styling across all charts
-)
 
 def _empty_fig(title=""):
     """Blank themed figure used as a placeholder before callbacks are wired."""
@@ -471,10 +465,10 @@ def update_waterfall(trailing_months):
             y            = wd['y'],
             text         = wd['text'],
             textposition = 'outside',
-            increasing   = dict(marker=dict(color='#7EB8A4')), # green for pos
-            decreasing   = dict(marker=dict(color='#C87070')), # red for neg
-            totals       = dict(marker=dict(color='#A89FD8')), # purple for net
-            connector    = dict(line=dict(color='#2a2e3a', width=1)), # border color
+            increasing   = dict(marker=dict(color=COLORS['accent'])), # green for pos
+            decreasing   = dict(marker=dict(color=COLORS['danger'])), # red for neg
+            totals       = dict(marker=dict(color=COLORS['accentB'])), # purple for net
+            connector    = dict(line=dict(color=COLORS['border'], width=1)), # border color
         )
     )
 
@@ -484,8 +478,8 @@ def update_waterfall(trailing_months):
         margin = dict(t=40, b=40, l=40, r=40),
     )
 
-    fig.update_yaxes(tickprefix='$', tickformat=',.0f', gridcolor='#1e2230', showgrid=True)
-    fig.update_xaxes(gridcolor='#1e2230', showgrid=False)
+    fig.update_yaxes(tickprefix='$', tickformat=',.0f', gridcolor=COLORS['gridline'], showgrid=True)
+    fig.update_xaxes(gridcolor=COLORS['gridline'], showgrid=False)
 
     return fig
 
@@ -515,7 +509,7 @@ def update_stl(trailing_months):
             **PLOTLY_THEME,
             height=400,
             title=dict(text='Not enough data for STL (need 24+ months)',
-                    font=dict(color='#6b7080'))
+                    font=dict(color=COLORS['muted']))
         )
         return fig
 
@@ -537,7 +531,7 @@ def update_stl(trailing_months):
             x=monthly['month'],
             y=monthly['trend'],
             mode='lines',
-            line=dict(color='#7EB8A4', width=2),
+            line=dict(color=COLORS['accent'], width=2),
             name='Trend',
             hovertemplate='%{x|%b %Y}: $%{y:,.0f}<extra></extra>' # last bit suppresses default trace name in hover box
         ),
@@ -554,7 +548,7 @@ def update_stl(trailing_months):
             marker=dict(
                 color=monthly['seasonal'],
                 # maps values to colors
-                colorscale=[[0, '#C87070'], [0.5, '#2a2e3a'], [1, '#7EB8A4']],
+                colorscale=[[0, COLORS['danger']], [0.5, COLORS['border']], [1, COLORS['accent']]],
                 cmid=0, # center colorscale at 0
             ),
             name='Seasonal',
@@ -571,7 +565,7 @@ def update_stl(trailing_months):
             y=monthly['residual'],
             marker=dict(
                 color=monthly['residual'],
-                colorscale=[[0, '#C87070'], [0.5, '#2a2e3a'], [1, '#7EB8A4']],
+                colorscale=[[0, COLORS['danger']], [0.5, COLORS['border']], [1, COLORS['accent']]],
                 cmid=0
             ),
             name='Residual',
@@ -588,8 +582,8 @@ def update_stl(trailing_months):
         margin=dict(t=40, b=40, l=40, r=40)
     )
 
-    fig.update_yaxes(tickprefix='$', tickformat=',.0f', gridcolor='#1e2230')
-    fig.update_xaxes(gridcolor='#1e2230', showgrid=False)
+    fig.update_yaxes(tickprefix='$', tickformat=',.0f', gridcolor=COLORS['gridline'])
+    fig.update_xaxes(gridcolor=COLORS['gridline'], showgrid=False)
 
     return fig
 
@@ -622,7 +616,7 @@ def update_heatmap(trailing_months, scale_mode):
         z_values = pivot_normalized.values
         # diverging colorscale - green (negative z, low spending) to red (+, high)
         # plotly colorscales are always defined on normalized [0, 1] domain
-        colorscale = [[0, '#7EB8A4'], [0.5, '#1b1e26'], [1, '#C87070']]
+        colorscale = [[0, COLORS['accent']], [0.5, COLORS['surf2']], [1, COLORS['danger']]]
         zmid = 0 # anchors diverging colorscale at 0
         colorbar_title = 'σ' # sigma for std
 
@@ -651,7 +645,7 @@ def update_heatmap(trailing_months, scale_mode):
     else:
         z_values = pivot_raw.values
         # single-direction colorscale since spending is >= 0
-        colorscale = [[0, '#1b1e26'], [1, '#7EB8A4']]
+        colorscale = [[0, COLORS['surf2']], [1, COLORS['accent']]]
         zmid = None # not used for single-direction
         colorbar_title = '$'
         customdata = None
@@ -695,7 +689,7 @@ def update_heatmap(trailing_months, scale_mode):
         type='line',
         x0=0, x1=1, xref='paper', # 'paper' spans full width regardless of x-axis units
         y0=0.5, y1=0.5, yref='y',
-        line=dict(color='#363b4a', width=2),
+        line=dict(color=COLORS['border2'], width=2),
     )
 
     return fig
@@ -719,7 +713,7 @@ def update_vs_avg(trailing_months):
     comparison = _vs_avg_data(analysis_df)
 
     # color bars by direction: red = higher than usual, green = lower
-    colors = ['#C87070' if d > 0 else '#7EB8A4' for d in comparison['deviation']] 
+    colors = [COLORS['danger'] if d > 0 else COLORS['accent'] for d in comparison['deviation']] 
 
     fig = go.Figure(
         go.Bar(
@@ -747,7 +741,7 @@ def update_vs_avg(trailing_months):
     )
 
     fig.update_yaxes(autorange='reversed') # largest positive deviation at top
-    fig.update_xaxes(tickprefix='$', tickformat=',.0f', gridcolor='#1e2230')
+    fig.update_xaxes(tickprefix='$', tickformat=',.0f', gridcolor=COLORS['gridline'])
 
     return fig
 
@@ -826,7 +820,7 @@ def update_volatility(trailing_months):
             x=stats['cv'],
             y=stats['category'],
             orientation='h',
-            marker=dict(color='#A89FD8'),
+            marker=dict(color=COLORS['accentB']),
             text=[f'{cv:.2f}' for cv in stats['cv']],
             textposition='outside',
             hovertemplate=(
@@ -847,6 +841,6 @@ def update_volatility(trailing_months):
     )
 
     fig.update_yaxes(autorange='reversed') # high volatility at top
-    fig.update_xaxes(gridcolor='#1e2230')
+    fig.update_xaxes(gridcolor=COLORS['gridline'])
 
     return fig

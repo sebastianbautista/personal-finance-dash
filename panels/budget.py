@@ -10,7 +10,8 @@ from dash import dcc, html, Input, Output, callback
 import plotly.graph_objects as go
 
 # reuse same theme as panel A
-from panels.cashflow import PLOTLY_THEME, _chart_card, _kpi_card, _empty_fig
+from theme import COLORS, PLOTLY_THEME
+from panels.cashflow import _chart_card, _kpi_card
 
 # 1. Data aggregation helpers ----
 
@@ -340,11 +341,11 @@ def update_transition_matrix(category_filter):
             z=matrix.values,
             x=matrix.columns,
             y=matrix.index,
-            colorscale=[[0, '#1b1e26'], [1, '#A89FD8']],
+            colorscale=[[0, COLORS['surf2']], [1, '#A89FD8']],
             zmin=0, zmax=1, # fixed scale for probabilities
             text=matrix.values,
             texttemplate='%{text:.1%}', # show percentage on each cell
-            textfont=dict(size=16, color='#dde0e8'),
+            textfont=dict(size=16, color=COLORS['text']),
             colorbar=dict(
                 title=dict(text='Probability', side='right'),
                 tickformat='.0%',
